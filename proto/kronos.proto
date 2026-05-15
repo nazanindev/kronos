@@ -1,0 +1,89 @@
+syntax = "proto3";
+
+package kronos;
+
+option go_package = "kronos/proto";
+
+// ─── Worker → Scheduler heartbeats ───────────────────────────────────────────
+
+message WorkerHeartbeat {
+  string worker_id  = 1;
+  int32  cpu_cores  = 2;
+  int64  memory_mb  = 3;
+  map<string, string> labels = 4;
+  WorkerState state = 5;
+}
+
+enum WorkerState {
+  IDLE = 0;
+  BUSY = 1;
+}
+
+// ─── Job submission ───────────────────────────────────────────────────────────
+
+message JobSpec {
+  string   command  = 1;
+  repeated string args = 2;
+  map<string, string> env = 3;
+  // resource requirements
+  int32  require_cpu_cores = 4;
+  int64  require_memory_mb = 5;
+  map<string, string> label_selectors = 6;
+}
+
+message JobReceipt {
+  string job_id = 1;
+}
+
+// ─── Job assignment (scheduler → worker) ─────────────────────────────────────
+
+message JobAssignment {
+  string   job_id  = 1;
+  string   command = 2;
+  repeated string args = 3;
+  map<string, string> env = 4;
+}
+
+// ─── Result reporting (worker → scheduler) ───────────────────────────────────
+
+message JobResult {
+  string job_id  = 1;
+  bool   success = 2;
+  string output  = 3;
+  string error   = 4;
+}
+
+message ResultAck {}
+
+// ─── Status query ─────────────────────────────────────────────────────────────
+
+message JobStatusRequest {
+  string job_id = 1;
+}
+
+message JobStatus {
+  string   job_id    = 1;
+  JobState state     = 2;
+  string   worker_id = 3;
+  string   output    = 4;
+  string   error     = 5;
+}
+
+enum JobState {
+  PENDING   = 0;
+  ASSIGNED  = 1;
+  RUNNING   = 2;
+  SUCCEEDED = 3;
+  FAILED    = 4;
+}
+
+// ─── Service ──────────────────────────────────────────────────────────────────
+
+service Scheduler {
+  // Worker opens a bidi stream: sends heartbeats, receives job assignments.
+  rpc Connect(stream WorkerHeartbeat) returns (stream JobAssignment);
+
+  rpc SubmitJob(JobSpec)             returns (JobReceipt);
+  rpc ReportResult(JobResult)        returns (ResultAck);
+  rpc GetJobStatus(JobStatusRequest) returns (JobStatus);
+}
