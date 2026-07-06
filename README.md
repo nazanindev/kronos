@@ -72,14 +72,16 @@ Workers reconnect automatically if the scheduler restarts.
 # submit returns a job ID
 JOB=$(./bin/client submit -cpu 2 -mem 512 echo "hello world")
 
-# optional resource requirements and label selectors
+# optional resource requirements, label selectors, and extra env
 JOB=$(./bin/client submit \
   -cpu 4 \
   -mem 1024 \
   -label region=us-west \
-  -env DEBUG=1 \
-  python3 train.py --epochs 10)
+  -env GREETING=hello \
+  sh -c 'echo "$GREETING from $(hostname)"')
 ```
+
+Jobs are commands executed in the worker's working directory, with `-env` merged over the worker's own environment. Kronos does not ship code to workers: anything a job references (scripts, data files) must already exist on the machine the worker runs on. Real schedulers solve this with container images or a shared filesystem; kronos deliberately stops at the scheduling problem.
 
 **4. Check status**
 

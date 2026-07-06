@@ -164,9 +164,8 @@ func dial(t *testing.T, addr string) pb.SchedulerClient {
 	return pb.NewSchedulerClient(conn)
 }
 
-// submitShell submits `/bin/sh -c script`. Scripts must use absolute paths for
-// external commands (/bin/sleep) because the executor passes only `env` to the
-// job, so the child has no PATH.
+// submitShell submits `/bin/sh -c script` with env merged over the worker's
+// own environment.
 func submitShell(t *testing.T, c pb.SchedulerClient, script string, env map[string]string) string {
 	t.Helper()
 	receipt, err := c.SubmitJob(context.Background(), &pb.JobSpec{
