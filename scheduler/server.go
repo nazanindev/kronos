@@ -44,7 +44,7 @@ func (s *server) Connect(stream pb.Scheduler_ConnectServer) error {
 				recvErr <- err
 				return
 			}
-			s.sched.Heartbeat(hb)
+			s.sched.Heartbeat(hb, assignCh)
 		}
 	}()
 

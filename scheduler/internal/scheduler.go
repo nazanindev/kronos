@@ -62,13 +62,30 @@ func (s *Scheduler) RegisterWorker(hb *pb.WorkerHeartbeat, ch chan *pb.JobAssign
 	s.mu.Unlock()
 }
 
-// Heartbeat refreshes a worker's last-seen time and capabilities.
-// State is managed exclusively by the scheduler (dispatch/CompleteJob) so
-// heartbeat state is intentionally ignored to avoid races.
-func (s *Scheduler) Heartbeat(hb *pb.WorkerHeartbeat) {
+// Heartbeat refreshes a worker's last-seen time and capabilities. A heartbeat
+// from an unknown worker means the reaper evicted it while its stream stayed
+// alive (e.g. a healed partition): the live heartbeat is proof it is back, so
+// it is re-registered — always as IDLE, even if it is still finishing a job
+// that has since been re-queued. Registering BUSY would wedge it: the stale
+// result credits the job's recorded (new) worker, so nothing would ever flip
+// this one back. IDLE at worst buffers one assignment behind the stale job,
+// and the agent executes sequentially. State is otherwise managed exclusively
+// by the scheduler (dispatch/CompleteJob); heartbeat state is ignored to
+// avoid races.
+func (s *Scheduler) Heartbeat(hb *pb.WorkerHeartbeat, ch chan *pb.JobAssignment) {
 	s.mu.Lock()
 	w, ok := s.workers[hb.WorkerId]
 	if !ok {
+		s.workers[hb.WorkerId] = &WorkerEntry{
+			ID:       hb.WorkerId,
+			CpuCores: hb.CpuCores,
+			MemoryMb: hb.MemoryMb,
+			Labels:   copyMap(hb.Labels),
+			State:    pb.WorkerState_IDLE,
+			LastSeen: time.Now(),
+			AssignCh: ch,
+		}
+		s.dispatch()
 		s.mu.Unlock()
 		return
 	}
@@ -79,10 +96,15 @@ func (s *Scheduler) Heartbeat(hb *pb.WorkerHeartbeat) {
 	s.mu.Unlock()
 }
 
-// UnregisterWorker removes a worker that has disconnected.
+// UnregisterWorker removes a worker whose stream has died and re-queues its
+// in-flight jobs. Without the re-queue, a crashed worker's job would stay
+// ASSIGNED forever: the reaper only scans workers still in the map, so it can
+// recover from silence (partition) but never from a stream death (crash).
 func (s *Scheduler) UnregisterWorker(workerID string) {
 	s.mu.Lock()
 	delete(s.workers, workerID)
+	s.requeue(map[string]bool{workerID: true})
+	s.dispatch()
 	s.mu.Unlock()
 }
 
@@ -155,6 +177,14 @@ func (s *Scheduler) Reap(ttl time.Duration) {
 		s.mu.Unlock()
 		return
 	}
+	s.requeue(dead)
+	s.dispatch()
+	s.mu.Unlock()
+}
+
+// requeue moves in-flight jobs owned by the given workers back to the pending
+// queue. Must be called with s.mu held.
+func (s *Scheduler) requeue(dead map[string]bool) {
 	for _, j := range s.jobs {
 		if dead[j.WorkerID] && (j.State == pb.JobState_ASSIGNED || j.State == pb.JobState_RUNNING) {
 			j.State = pb.JobState_PENDING
@@ -162,8 +192,6 @@ func (s *Scheduler) Reap(ttl time.Duration) {
 			s.pending = append(s.pending, j)
 		}
 	}
-	s.dispatch()
-	s.mu.Unlock()
 }
 
 // dispatch tries to pair every pending job with an idle matching worker.

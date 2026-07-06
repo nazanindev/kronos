@@ -5,7 +5,7 @@ PROTOC_OPTS := --go_out=$(PROTO_DIR) --go_opt=paths=source_relative \
                --go-grpc_out=$(PROTO_DIR) --go-grpc_opt=paths=source_relative \
                -I $(PROTO_DIR)
 
-.PHONY: proto build tidy
+.PHONY: proto build tidy chaos
 
 proto:
 	protoc $(PROTOC_OPTS) $(PROTO_FILE)
@@ -15,6 +15,9 @@ build:
 	go build -o bin/scheduler ./scheduler
 	go build -o bin/worker    ./worker
 	go build -o bin/client    ./client
+
+chaos:
+	cd chaos && go test -v -timeout 180s .
 
 tidy:
 	cd proto     && go mod tidy

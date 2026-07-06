@@ -102,7 +102,33 @@ A job is matched to a worker when:
 
 Matching uses first-fit across the idle worker pool. Unmatched jobs queue until a suitable worker becomes available.
 
-Workers that miss heartbeats for more than 15 s are evicted; their in-flight jobs are re-queued automatically.
+## Failure semantics
+
+Kronos provides **at-least-once execution**: a job assigned to a worker that crashes or partitions is re-queued and run again, so a job that straddles a failure can execute more than once. Exactly-once is not attempted.
+
+| Failure | Detection | Recovery |
+|---------|-----------|----------|
+| Worker crash (process dies) | Stream error, immediate | In-flight jobs re-queued, worker removed |
+| Worker partition (silent but connected) | Heartbeat TTL (default 15 s, `-worker-ttl`) | In-flight jobs re-queued, worker evicted |
+| Partition heals | Next heartbeat from the evicted worker | Worker re-registered idle; its stale result cannot corrupt completed job state |
+| Scheduler crash | Workers retry their stream (`-retry`) | Workers reconnect and re-register; job history is in-memory and lost by design — old job IDs return `NotFound` |
+
+## Chaos suite
+
+`chaos/` is a black-box fault-injection suite: each scenario builds the real binaries, runs them as separate OS processes, injects failures with signals (`SIGKILL` = crash, `SIGSTOP`/`SIGCONT` = partition and heal), and asserts on job state over the real gRPC API.
+
+```sh
+make chaos
+```
+
+| Scenario | Injects | Asserts |
+|----------|---------|---------|
+| `TestWorkerCrashMidJob` | `SIGKILL` mid-job | Job completes on the surviving worker |
+| `TestWorkerPartitionAndHeal` | `SIGSTOP` mid-job, later `SIGCONT` | Re-queue after TTL; duplicate run is visible (at-least-once); stale result ignored; healed worker takes new work |
+| `TestSchedulerRestart` | `SIGKILL` the scheduler | Workers reconnect; new jobs schedule; old IDs return `NotFound` |
+| `TestBurstSpreadsAndCompletes` | 20 jobs, 3 workers | All complete, load spreads |
+
+The suite found (and now guards) three real bugs: crashed workers orphaned their in-flight jobs forever (only the TTL path re-queued), an evicted-but-alive worker could never rejoin the pool, and a rejoining worker could wedge itself permanently `BUSY`.
 
 ## gRPC API
 
@@ -125,6 +151,7 @@ kronos/
 ├── scheduler/   # scheduler service   (module: kronos/scheduler)
 ├── worker/      # worker service      (module: kronos/worker)
 ├── client/      # client CLI          (module: kronos/client)
+├── chaos/       # fault-injection suite (module: kronos/chaos)
 ├── go.work      # workspace linking all modules
 └── Makefile
 ```
