@@ -30,6 +30,8 @@ func main() {
 	cpuCores := flag.Int("cpu", 1, "available CPU cores")
 	memoryMb := flag.Int64("mem", 512, "available memory in MB")
 	workerID := flag.String("id", "", "worker ID (default: hostname)")
+	heartbeat := flag.Duration("heartbeat", 5*time.Second, "heartbeat interval")
+	retry := flag.Duration("retry", 5*time.Second, "reconnect delay after losing the scheduler")
 
 	labels := make(labelFlags)
 	flag.Var(labels, "label", "label as key=value (repeatable)")
@@ -47,13 +49,13 @@ func main() {
 	}
 	defer conn.Close()
 
-	agent := internal.New(id, int32(*cpuCores), *memoryMb, labels, conn)
+	agent := internal.New(id, int32(*cpuCores), *memoryMb, labels, *heartbeat, conn)
 
 	ctx := context.Background()
 	for {
 		if err := agent.Run(ctx); err != nil {
-			log.Printf("disconnected: %v — retrying in 5s", err)
-			time.Sleep(5 * time.Second)
+			log.Printf("disconnected: %v — retrying in %s", err, *retry)
+			time.Sleep(*retry)
 		}
 	}
 }

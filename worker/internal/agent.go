@@ -12,26 +12,26 @@ import (
 	"google.golang.org/grpc"
 )
 
-const heartbeatInterval = 5 * time.Second
-
 // Agent connects to the scheduler, sends heartbeats, and executes assigned jobs.
 type Agent struct {
-	id       string
-	cpuCores int32
-	memoryMb int64
-	labels   map[string]string
-	client   pb.SchedulerClient
-	exec     Executor
-	busy     atomic.Bool
+	id                string
+	cpuCores          int32
+	memoryMb          int64
+	labels            map[string]string
+	heartbeatInterval time.Duration
+	client            pb.SchedulerClient
+	exec              Executor
+	busy              atomic.Bool
 }
 
-func New(id string, cpuCores int32, memoryMb int64, labels map[string]string, conn *grpc.ClientConn) *Agent {
+func New(id string, cpuCores int32, memoryMb int64, labels map[string]string, heartbeatInterval time.Duration, conn *grpc.ClientConn) *Agent {
 	return &Agent{
-		id:       id,
-		cpuCores: cpuCores,
-		memoryMb: memoryMb,
-		labels:   labels,
-		client:   pb.NewSchedulerClient(conn),
+		id:                id,
+		cpuCores:          cpuCores,
+		memoryMb:          memoryMb,
+		labels:            labels,
+		heartbeatInterval: heartbeatInterval,
+		client:            pb.NewSchedulerClient(conn),
 	}
 }
 
@@ -52,7 +52,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	// Heartbeat goroutine: one sender on the stream, ticker-driven.
 	// gRPC allows concurrent Send + Recv on the same stream from different goroutines.
 	go func() {
-		t := time.NewTicker(heartbeatInterval)
+		t := time.NewTicker(a.heartbeatInterval)
 		defer t.Stop()
 		for {
 			select {

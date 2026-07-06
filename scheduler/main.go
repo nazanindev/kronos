@@ -12,21 +12,20 @@ import (
 	"google.golang.org/grpc"
 )
 
-const reaperInterval = 5 * time.Second
-const workerTTL = 15 * time.Second
-
 func main() {
 	addr := flag.String("addr", ":50051", "listen address")
+	workerTTL := flag.Duration("worker-ttl", 15*time.Second, "evict workers silent longer than this")
+	reapInterval := flag.Duration("reap-interval", 5*time.Second, "how often to check for dead workers")
 	flag.Parse()
 
 	sched := internal.New()
 
 	// Reaper: periodically evict workers that have gone silent.
 	go func() {
-		t := time.NewTicker(reaperInterval)
+		t := time.NewTicker(*reapInterval)
 		defer t.Stop()
 		for range t.C {
-			sched.Reap(workerTTL)
+			sched.Reap(*workerTTL)
 		}
 	}()
 
